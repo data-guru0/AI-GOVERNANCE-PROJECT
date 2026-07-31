@@ -1,0 +1,71 @@
+{
+  "realm": "governance-demo",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 300,
+  "users": [
+    {
+      "username": "student",
+      "email": "student@governance-demo.local",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Student",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "student123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["demo-agent"]
+    },
+    {
+      "username": "instructor",
+      "email": "instructor@governance-demo.local",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Instructor",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "instructor123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["admin"]
+    }
+  ],
+  "roles": {
+    "realm": [
+      { "name": "demo-agent", "description": "Standard support-agent privileges — the role every /chat request is authorized under unless the token says otherwise." },
+      { "name": "admin", "description": "Elevated privileges (destructive admin_agent actions). Only the 'instructor' demo account has this." }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "dashboard",
+      "publicClient": true,
+      "enabled": true,
+      "protocol": "openid-connect",
+      "redirectUris": ["http://localhost:8501/*"],
+      "webOrigins": ["http://localhost:8501"],
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "fullScopeAllowed": true
+    },
+    {
+      "clientId": "agent-service",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "agent-service-secret-local-only",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "description": "OIDC client the agent uses to prove a *human-facing* identity token exists alongside its SPIFFE workload identity. Client-credentials grant only — no human login."
+    }
+  ]
+}

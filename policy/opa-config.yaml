@@ -1,0 +1,25 @@
+# Loaded via `opa run --config-file`. Every policy decision is pushed to
+# the agent's /internal/audit-log endpoint (verified empirically: OPA
+# gzip-compresses a JSON array of decision entries and POSTs it on this
+# interval) — agent/audit_log.py hash-chains each one into Postgres. This
+# replaced an earlier plain-text `tee`'d log file, which had no tamper
+# protection at all.
+#
+# NOTE: OPA's decision_logs plugin appends a `resource` path to the
+# service's `url` when POSTing — it defaults to `/logs`, not the empty
+# string, so a service `url` that already IS the full target path breaks
+# with a 404 (confirmed via a live `docker compose logs opa` run: every
+# upload failed with "server replied with HTTP 404 Not Found" because OPA
+# was actually POSTing to /internal/audit-log/logs). Fix: `url` holds only
+# the base, `resource` holds the real path.
+services:
+  audit_sink:
+    url: http://agent:8000
+decision_logs:
+  service: audit_sink
+  resource: /internal/audit-log
+  reporting:
+    min_delay_seconds: 2
+    max_delay_seconds: 5
+labels:
+  system: governance-demo

@@ -1,0 +1,7 @@
+streamlit==1.40.2
+requests==2.32.3
+pandas==2.2.3
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+# imports agent.keycloak_auth, which needs PyJWT
+pyjwt[crypto]==2.10.1

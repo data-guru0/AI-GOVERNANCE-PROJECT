@@ -1,0 +1,35 @@
+# Verbatim from INSTRUCTIONS.md. Each item names a real evidence_source that
+# compliance/generate_report.py resolves against a live service/log/file —
+# never reimplemented or simulated.
+items:
+  - framework: "NIST AI RMF (Govern)"
+    requirement: "Access to the AI system is role-based and enforced"
+    evidence_source: opa_decision_log
+
+  - framework: "NIST AI RMF (Measure)"
+    requirement: "Model version and performance are tracked before deployment"
+    evidence_source: mlflow_model_card
+
+  - framework: "NIST AI RMF (Manage)"
+    requirement: "The system can be immediately disabled if it misbehaves"
+    evidence_source: killswitch_log
+
+  - framework: "ISO 42001"
+    requirement: "Sensitive data used by the AI system is identified and classified"
+    evidence_source: openmetadata_pii_tags
+
+  - framework: "ISO 42001"
+    requirement: "AI system decisions are logged for traceability"
+    evidence_source: langfuse_traces
+
+  - framework: "EU AI Act"
+    requirement: "The system's risk tier is documented"
+    evidence_source: mlflow_risk_tier
+
+  - framework: "EU AI Act"
+    requirement: "Human oversight / override capability exists"
+    evidence_source: killswitch_log
+
+  - framework: "OWASP Agentic AI Top 10"
+    requirement: "Agent runtime risks are actively defended against"
+    evidence_source: agt_verify_output

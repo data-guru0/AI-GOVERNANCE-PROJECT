@@ -1,0 +1,323 @@
+
+services:
+  # =========================================================================
+  # 1. IDENTITY GOVERNANCE — Keycloak (human login) + SPIFFE/SPIRE (agent's
+  #    own workload identity, no static hardcoded key).
+  # =========================================================================
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_change_me}
+    volumes:
+      - ./identity/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    ports:
+      - "8080:8080"
+
+  spire-server:
+    image: ghcr.io/spiffe/spire-server:1.9.0
+    container_name: spire-server
+    command: ["-config", "/opt/spire/conf/server/server.conf"]
+    volumes:
+      - ./identity/spire/server.conf:/opt/spire/conf/server/server.conf:ro
+      - spire-server-data:/opt/spire/data
+    ports:
+      - "8081:8081"
+
+  # One-shot: mints a join token, renders agent.conf, registers the workload
+  # entry for the `agent` container. See identity/spire/setup-entrypoint.sh.
+  spire-setup:
+    image: docker:27-cli
+    depends_on:
+      - spire-server
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./identity/spire/setup-entrypoint.sh:/setup-entrypoint.sh:ro
+      - ./identity/spire/agent.conf.template:/template/agent.conf.template:ro
+      - spire-shared:/shared
+    entrypoint: ["/bin/sh", "/setup-entrypoint.sh"]
+
+  spire-agent:
+    image: ghcr.io/spiffe/spire-agent:1.9.0
+    container_name: spire-agent
+    depends_on:
+      spire-setup:
+        condition: service_completed_successfully
+    command: ["-config", "/opt/spire/conf/agent/agent.conf"]
+    # Real bug found by actually running this: without `pid: host`,
+    # spire-agent can't resolve ANY caller on the Workload API socket at
+    # all ("could not resolve caller information", not specific to the
+    # docker attestor — the unix attestor hit the identical error).
+    # Docker gives every container its own PID namespace by default;
+    # sharing the host's lets spire-agent actually see and identify the
+    # process on the other end of the connection. A real, deliberate
+    # privilege grant, appropriate for a single-host local demo — not
+    # something to carry into a shared host. (No docker.sock mount needed
+    # anymore now that the "unix" attestor doesn't query the Docker
+    # daemon — see agent.conf.template.)
+    pid: host
+    volumes:
+      - spire-shared:/opt/spire/conf/agent
+      - spire-socket:/run/spire/sockets
+    labels:
+      com.governance.workload: "spire-agent"
+
+  # =========================================================================
+  # 2. POLICY ENGINE — Open Policy Agent, ONE shared hub queried from the
+  #    Data, Agent, and Operations layers below.
+  # =========================================================================
+  opa:
+    image: openpolicyagent/opa:0.68.0
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "--config-file", "/config/opa-config.yaml", "--watch", "/policies"]
+    volumes:
+      - ./policy/policies:/policies:ro
+      - ./policy/opa-config.yaml:/config/opa-config.yaml:ro
+    ports:
+      - "8181:8181"
+
+  # =========================================================================
+  # APPLICATION DATABASE — the real Postgres the agent's specialist agents
+  # (order_agent/billing_agent/admin_agent) query and write to. Distinct
+  # from om-mysql (OpenMetadata's own backend) and langfuse-db (Langfuse's
+  # own backend) below — this one holds the actual business data.
+  # =========================================================================
+  app-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${APP_DB_SUPERUSER_PASSWORD:-app_db_change_me}
+      POSTGRES_DB: governance_demo
+      AGENT_APP_DB_PASSWORD: ${APP_DB_PASSWORD:-agent_app_change_me}
+      DASHBOARD_DB_PASSWORD: ${DASHBOARD_DB_PASSWORD:-dashboard_viewer_change_me}
+    volumes:
+      - app-db-data:/var/lib/postgresql/data
+      - ./data-governance/init_db.sh:/docker-entrypoint-initdb.d/init_db.sh:ro
+    ports:
+      - "5432:5432"
+
+  # =========================================================================
+  # 3. DATA GOVERNANCE — OpenMetadata (catalog + PII tags + lineage).
+  #    No Airflow ingestion scheduler: data-governance/ingest_and_tag_pii.py
+  #    runs as a one-off script instead (saves ~2 containers / ~2GB RAM).
+  # =========================================================================
+  om-mysql:
+    image: mysql:8.0.34
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-openmetadata_change_me}
+      MYSQL_DATABASE: openmetadata_db
+    volumes:
+      - om-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-openmetadata_change_me}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  om-elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.4
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    mem_limit: 1.5g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  # Real bug found by actually running this: openmetadata-server crashed on
+  # first boot against a fresh MySQL database ("Table
+  # 'openmetadata_db.DATABASE_CHANGE_LOG' doesn't exist") — a brand-new
+  # database needs its schema created via a migration step BEFORE the main
+  # server starts; the server image doesn't do this itself on plain
+  # startup. This one-shot service (same image, official
+  # openmetadata-ops.sh migrate command, matching OpenMetadata's own
+  # reference docker-compose) does that once; openmetadata-server below
+  # waits for it to finish.
+  om-migrate:
+    image: docker.getcollate.io/openmetadata/server:1.5.11
+    command: ["./bootstrap/openmetadata-ops.sh", "migrate"]
+    depends_on:
+      om-mysql:
+        condition: service_healthy
+      om-elasticsearch:
+        condition: service_healthy
+    environment:
+      DB_DRIVER_CLASS: com.mysql.cj.jdbc.Driver
+      DB_SCHEME: mysql
+      DB_USER: root
+      DB_USER_PASSWORD: ${MYSQL_ROOT_PASSWORD:-openmetadata_change_me}
+      DB_HOST: om-mysql
+      DB_PORT: 3306
+      OM_DATABASE: openmetadata_db
+      ELASTICSEARCH_HOST: om-elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      ELASTICSEARCH_SCHEME: http
+
+  openmetadata-server:
+    image: docker.getcollate.io/openmetadata/server:1.5.11
+    depends_on:
+      om-migrate:
+        condition: service_completed_successfully
+    environment:
+      DB_DRIVER_CLASS: com.mysql.cj.jdbc.Driver
+      DB_SCHEME: mysql
+      DB_USER: root
+      DB_USER_PASSWORD: ${MYSQL_ROOT_PASSWORD:-openmetadata_change_me}
+      DB_HOST: om-mysql
+      DB_PORT: 3306
+      OM_DATABASE: openmetadata_db
+      ELASTICSEARCH_HOST: om-elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      ELASTICSEARCH_SCHEME: http
+      AUTHORIZER_INIT_PII_MASKING: "true"
+    ports:
+      - "8585:8585"
+
+  # =========================================================================
+  # 4. MODEL GOVERNANCE — MLflow Model Registry (sqlite backend, no extra DB
+  #    container needed for a local teaching deployment).
+  # =========================================================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.16.0
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+    volumes:
+      - mlflow-data:/mlflow
+    ports:
+      - "5000:5000"
+
+  # =========================================================================
+  # 5/6/7. AGENT — real OpenAI + Groq calls, Guardrails AI, Agent Governance
+  #    Toolkit, OPA tool-call check, Langfuse tracing. Also the one image
+  #    every one-off governance/compliance/demo script runs through.
+  # =========================================================================
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    depends_on:
+      - opa
+      - mlflow
+      - spire-agent
+      - openmetadata-server
+      - app-db
+    env_file: .env
+    environment:
+      OPA_URL: http://opa:8181
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      OPENMETADATA_URL: http://openmetadata-server:8585/api
+      SPIFFE_ENDPOINT_SOCKET: "unix:///run/spire/sockets/agent.sock"
+      AGENT_SPIFFE_ID: "spiffe://governance.demo/agent/demo-agent"
+      LANGFUSE_HOST: http://langfuse:3000
+      KEYCLOAK_URL: http://keycloak:8080
+      DATABASE_URL: postgresql+psycopg2://agent_app:${APP_DB_PASSWORD:-agent_app_change_me}@app-db:5432/governance_demo
+      RE_EVAL_INTERVAL_SECONDS: "21600"
+    labels:
+      com.governance.workload: "agent"
+    volumes:
+      - .:/app
+      - spire-socket:/run/spire/sockets:ro
+      # Real bug found by actually running this: `mlflow server
+      # --default-artifact-root /mlflow/artifacts` (no --serve-artifacts
+      # proxy backend configured) stores that as a bare local filesystem
+      # path, not a proxied `mlflow-artifacts:/` URI — so mlflow.evaluate()
+      # / load_model() always require DIRECT disk access to that literal
+      # path, never falling back to an HTTP download. A fresh
+      # `docker compose run --rm agent ...` container (no cache from a
+      # prior local log_model() call) failed with a real
+      # "OSError: No such file or directory" trying to load the Production
+      # model version — the long-running `agent` container only worked by
+      # accident, because register_model.py had already written that exact
+      # path locally at its own startup. Sharing the same volume the
+      # `mlflow` service itself writes to is the real fix, matching
+      # MLflow's own expected deployment shape for a local artifact root.
+      - mlflow-data:/mlflow
+    ports:
+      - "8000:8000"
+
+  # =========================================================================
+  # 6. OPERATIONS GOVERNANCE — Langfuse tracing (lite: single Postgres,
+  #    no ClickHouse/Redis/MinIO — see README for the full-stack profile).
+  # =========================================================================
+  langfuse-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse_change_me}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  langfuse:
+    image: langfuse/langfuse:2
+    # Real bug found by actually running this: with a bare `depends_on:`,
+    # compose only waits for langfuse-db's CONTAINER to start, not for
+    # Postgres inside it to finish initializing — Langfuse's DB-migration
+    # step has no retry and exits immediately if it loses that race
+    # (confirmed: it crashed on a fresh `docker compose up`, then started
+    # fine seconds later once Postgres was actually ready). Gating on the
+    # healthcheck above makes this reliable on a cold start.
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse_change_me}@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change_me_local_only_nextauth_secret}
+      SALT: ${LANGFUSE_SALT:-change_me_local_only_salt}
+      # Real, documented Langfuse feature (LANGFUSE_INIT_*) that creates
+      # the org/project/user/API-keys automatically on first boot — no
+      # manual UI signup needed. Only takes effect against a fresh
+      # langfuse-db; re-running against an already-initialized one is a
+      # no-op (Langfuse checks for existing resources first).
+      LANGFUSE_INIT_ORG_ID: governance-demo-org
+      LANGFUSE_INIT_ORG_NAME: Governance Demo
+      LANGFUSE_INIT_PROJECT_ID: governance-demo-project
+      LANGFUSE_INIT_PROJECT_NAME: governance-demo
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: instructor@governance-demo.local
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-change_me_local_only}
+      LANGFUSE_INIT_USER_NAME: Instructor
+    ports:
+      - "3000:3000"
+
+  # =========================================================================
+  # DASHBOARD — live 7-layer checklist + compliance report tab.
+  # =========================================================================
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    depends_on:
+      - agent
+      - app-db
+    environment:
+      AGENT_URL: http://agent:8000
+      OPA_URL: http://opa:8181
+      KEYCLOAK_URL: http://keycloak:8080
+      AGENT_SPIFFE_ID: "spiffe://governance.demo/agent/demo-agent"
+      DATABASE_URL: postgresql+psycopg2://dashboard_viewer:${DASHBOARD_DB_PASSWORD:-dashboard_viewer_change_me}@app-db:5432/governance_demo
+    volumes:
+      - .:/app
+    ports:
+      - "8501:8501"
+
+volumes:
+  spire-server-data:
+  spire-shared:
+  spire-socket:
+  app-db-data:
+  om-mysql-data:
+  mlflow-data:
+  langfuse-db-data:

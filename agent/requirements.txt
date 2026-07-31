@@ -1,0 +1,62 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+openai==1.57.4
+pyyaml==6.0.2
+pandas==2.2.3
+mlflow==2.16.0
+textstat==0.7.4
+requests==2.32.3
+jinja2==3.1.4
+
+# Application database (customers/products/orders) queried/written by the
+# specialist agents in agent/agents/*.py.
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+
+# Governance layer 5 (Agent Governance): Guardrails AI input/output checks +
+# Microsoft's Agent Governance Toolkit for OWASP Agentic Top 10 runtime
+# screening (github.com/microsoft/agent-governance-toolkit). The toolkit is
+# actually TWO pip packages: agent-governance-toolkit (the `agt` CLI used
+# by compliance/generate_report.py) and agent-os-kernel (the real runtime
+# StatelessKernel used by governance_middleware.py — `[full]` on the first
+# package does NOT pull the second one in, verified by installing it).
+# guardrails-ai pinned to 0.10.2, not 0.6.4: 0.6.4 requires
+# langchain-core<0.4, which has ZERO overlap with langgraph's
+# langchain-core>=1.4.7 — a real ResolutionImpossible error caught by an
+# actual `docker compose build` (not just a soft pip warning, as an
+# earlier, less faithful test wrongly concluded). 0.10.2 requires
+# langchain-core>=1.0,<2, which genuinely overlaps langgraph's range.
+# Guard/Validator/register_validator/PassResult/FailResult usage in
+# governance_middleware.py verified unchanged against 0.10.2.
+guardrails-ai==0.10.2
+agent-governance-toolkit==4.1.0
+agent-os-kernel==3.7.0
+
+# Governance layer 6 (Operations): Langfuse tracing.
+langfuse==2.53.9
+
+# Governance layer 1 (Identity): fetches the agent's own SPIFFE X.509-SVID.
+# PyPI distribution name is "spiffe", not "pyspiffe"/"py-spiffe" (verified —
+# neither of those exist on PyPI). Pinned to 0.2.0, not the latest 0.3.0:
+# 0.3.0+ requires protobuf>=6.31, which conflicts with mlflow-skinny's
+# protobuf<6 pin (confirmed via a real pip resolver error) — 0.2.0's
+# protobuf>=5,<7 range is the newest version that overlaps both.
+spiffe==0.2.0
+
+# Governance layer 1 (human identity): validates Keycloak-issued JWTs on
+# every /chat request.
+pyjwt[crypto]==2.10.1
+
+# Governance layer 3 (Data): OpenMetadata is talked to via plain REST calls
+# (agent/om_client.py) rather than the openmetadata-ingestion SDK — that
+# SDK pulls in google-cloud-secret-manager, which pins protobuf<5, which
+# hard-breaks `spiffe` above (its generated code needs protobuf>=6.31;
+# confirmed via a real ImportError when both were installed together).
+
+# Multi-agent orchestration (agent/graph.py) — real StateGraph, replaces
+# the earlier hand-rolled if/return routing. Pulls in langchain-core>=1.4.7,
+# which is newer than what guardrails-ai declares (<0.4) — a real pip
+# metadata conflict, but verified harmless at runtime: our Guardrails usage
+# never touches the langchain-dependent code paths.
+langgraph==1.2.10

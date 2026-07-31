@@ -1,0 +1,46 @@
+# The "model card" attached to every MLflow Model Registry version of
+# governance-agent-model (see register_model.py). This is what step 4
+# (Model Governance) and the EU AI Act "risk tier documented" compliance
+# item both point to as evidence.
+model_name: governance-agent-model
+intended_use: >
+  Answers student-support questions about the sample order dataset
+  (data-governance/sample_dataset.csv) for teaching purposes only. Not for
+  real customer traffic.
+eval_notes: >
+  Evaluated with a real mlflow.evaluate() run (model-governance/promote_model.py
+  for the gate; model-governance/evaluate_model.py for a deeper standalone look)
+  against model-governance/eval_dataset.jsonl, scoring exact-match and readability
+  (Flesch-Kincaid, ARI grade level). Toxicity is deliberately NOT scored: MLflow's
+  default toxicity metric downloads a HuggingFace model at eval time, which would
+  violate this project's rule that only OpenAI/Groq get real network calls -- see
+  evaluate_model.py's comment. The actual promotion gate checks only
+  ari_grade_level/v1/mean < 20 (must stay under a "coherent, not degenerate
+  output" bar) -- exact_match is computed but not gated on, since an open-ended
+  answer essentially never matches a reference string exactly.
+limitations: >
+  Tiny 5-example eval set, English-only, no adversarial red-teaming beyond
+  what Guardrails AI / Agent Governance Toolkit catch at agent runtime.
+
+# `evaluate_for_production: true` means promote_model.py will actually run
+# this version through the real eval gate (model-governance/promote_model.py)
+# as a Production candidate. Both versions below are nominated -- neither is
+# pre-excluded -- so which one (if either) actually earns Production is
+# decided by real, measured evaluation results (champion/challenger), not by
+# this file. `risk_tier`/`risk_tier_reason` are updated by promote_model.py
+# itself after each real run, so they always reflect the latest evidence.
+versions:
+  - version_alias: v1_llama_staging
+    provider: groq
+    model_id: llama-3.1-8b-instant
+    stage: Staging
+    evaluate_for_production: true
+    risk_tier: high
+    risk_tier_reason: "Not yet evaluated against the current eval gate."
+  - version_alias: v2_gpt4o_mini_production
+    provider: openai
+    model_id: gpt-4o-mini
+    stage: Staging
+    evaluate_for_production: true
+    risk_tier: medium
+    risk_tier_reason: "Not yet evaluated against the current eval gate."
