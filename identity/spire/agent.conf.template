@@ -26,24 +26,6 @@ plugins {
     KeyManager "memory" {
         plugin_data {}
     }
-
-    # Real bug found by actually running this against Docker Desktop: the
-    # "docker" WorkloadAttestor identifies a caller by parsing its cgroup
-    # path for a container ID, but Docker Desktop's VM backend produces a
-    # cgroup v2 path SPIRE's matcher doesn't recognize (confirmed by
-    # reading it directly: "0::/../<container-id>", not the
-    # "/docker/<id>"-style path SPIRE expects) — every real connection got
-    # "PID attested to have selectors: []", so nothing was ever attested,
-    # not a config typo. Switched to the "unix" attestor: it identifies
-    # the caller by the real UID/GID the kernel reports on the socket
-    # connection (SO_PEERCRED) — no cgroup/Docker-daemon correlation
-    # needed, so it isn't sensitive to how a given Docker backend lays out
-    # cgroups. The tradeoff: a UID selector alone can't distinguish
-    # "the agent container" from "any other container running as the same
-    # UID" — but in this topology, the socket itself is only ever mounted
-    # into the `agent` service (see docker-compose.yml), so no other
-    # container can reach it to begin with; the UID check is real defense
-    # in depth on top of that volume-level isolation, not the only gate.
     WorkloadAttestor "unix" {
         plugin_data {}
     }

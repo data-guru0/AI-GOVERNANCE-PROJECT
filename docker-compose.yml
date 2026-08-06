@@ -45,17 +45,7 @@ services:
       spire-setup:
         condition: service_completed_successfully
     command: ["-config", "/opt/spire/conf/agent/agent.conf"]
-    # Real bug found by actually running this: without `pid: host`,
-    # spire-agent can't resolve ANY caller on the Workload API socket at
-    # all ("could not resolve caller information", not specific to the
-    # docker attestor — the unix attestor hit the identical error).
-    # Docker gives every container its own PID namespace by default;
-    # sharing the host's lets spire-agent actually see and identify the
-    # process on the other end of the connection. A real, deliberate
-    # privilege grant, appropriate for a single-host local demo — not
-    # something to carry into a shared host. (No docker.sock mount needed
-    # anymore now that the "unix" attestor doesn't query the Docker
-    # daemon — see agent.conf.template.)
+   
     pid: host
     volumes:
       - spire-shared:/opt/spire/conf/agent
@@ -127,15 +117,6 @@ services:
       timeout: 5s
       retries: 40
 
-  # Real bug found by actually running this: openmetadata-server crashed on
-  # first boot against a fresh MySQL database ("Table
-  # 'openmetadata_db.DATABASE_CHANGE_LOG' doesn't exist") — a brand-new
-  # database needs its schema created via a migration step BEFORE the main
-  # server starts; the server image doesn't do this itself on plain
-  # startup. This one-shot service (same image, official
-  # openmetadata-ops.sh migrate command, matching OpenMetadata's own
-  # reference docker-compose) does that once; openmetadata-server below
-  # waits for it to finish.
   om-migrate:
     image: docker.getcollate.io/openmetadata/server:1.5.11
     command: ["./bootstrap/openmetadata-ops.sh", "migrate"]
@@ -222,20 +203,6 @@ services:
     volumes:
       - .:/app
       - spire-socket:/run/spire/sockets:ro
-      # Real bug found by actually running this: `mlflow server
-      # --default-artifact-root /mlflow/artifacts` (no --serve-artifacts
-      # proxy backend configured) stores that as a bare local filesystem
-      # path, not a proxied `mlflow-artifacts:/` URI — so mlflow.evaluate()
-      # / load_model() always require DIRECT disk access to that literal
-      # path, never falling back to an HTTP download. A fresh
-      # `docker compose run --rm agent ...` container (no cache from a
-      # prior local log_model() call) failed with a real
-      # "OSError: No such file or directory" trying to load the Production
-      # model version — the long-running `agent` container only worked by
-      # accident, because register_model.py had already written that exact
-      # path locally at its own startup. Sharing the same volume the
-      # `mlflow` service itself writes to is the real fix, matching
-      # MLflow's own expected deployment shape for a local artifact root.
       - mlflow-data:/mlflow
     ports:
       - "8000:8000"
@@ -260,13 +227,6 @@ services:
 
   langfuse:
     image: langfuse/langfuse:2
-    # Real bug found by actually running this: with a bare `depends_on:`,
-    # compose only waits for langfuse-db's CONTAINER to start, not for
-    # Postgres inside it to finish initializing — Langfuse's DB-migration
-    # step has no retry and exits immediately if it loses that race
-    # (confirmed: it crashed on a fresh `docker compose up`, then started
-    # fine seconds later once Postgres was actually ready). Gating on the
-    # healthcheck above makes this reliable on a cold start.
     depends_on:
       langfuse-db:
         condition: service_healthy
@@ -275,11 +235,6 @@ services:
       NEXTAUTH_URL: http://localhost:3000
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change_me_local_only_nextauth_secret}
       SALT: ${LANGFUSE_SALT:-change_me_local_only_salt}
-      # Real, documented Langfuse feature (LANGFUSE_INIT_*) that creates
-      # the org/project/user/API-keys automatically on first boot — no
-      # manual UI signup needed. Only takes effect against a fresh
-      # langfuse-db; re-running against an already-initialized one is a
-      # no-op (Langfuse checks for existing resources first).
       LANGFUSE_INIT_ORG_ID: governance-demo-org
       LANGFUSE_INIT_ORG_NAME: Governance Demo
       LANGFUSE_INIT_PROJECT_ID: governance-demo-project
