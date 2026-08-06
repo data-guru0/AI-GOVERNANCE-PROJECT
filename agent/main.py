@@ -66,17 +66,9 @@ class ChatRequest(BaseModel):
 
 @app.on_event("startup")
 def startup():
-    # No fallback here on purpose — see governance_middleware.fetch_svid().
-    # If SPIRE isn't reachable yet the container's healthcheck fails and
-    # docker-compose keeps it out of rotation instead of silently serving
-    # requests under a fake identity.
     app.state.spiffe_id = gov.fetch_svid()
     print(f"[agent] booted with SPIFFE ID {app.state.spiffe_id}")
 
-    # No manual `docker compose run --rm agent python model-governance/...`
-    # required — this runs automatically. register+promote block startup
-    # (there's no working /chat without a Production model); cataloging +
-    # the recurring re-evaluation schedule run in the background.
     startup_automation.run_initial_setup()
     startup_automation.start_background_scheduler()
 

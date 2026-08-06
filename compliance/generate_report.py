@@ -127,15 +127,6 @@ def agt_verify_output() -> tuple[dict, str]:
             evidence = f"agt verify: {passed_ct}/{total_ct} OWASP ASI 2026 controls present ({coverage}% coverage)"
             missing = [c["id"] for c in parsed.get("controls", []) if not c.get("present") and "agentmesh" in (c.get("error") or "")]
             if missing:
-                # Verified live: `pip show agentmesh` on PyPI returns "Placeholder
-                # for reserving the agentmesh package name" (Aboyai Inc, v0.1.1,
-                # no actual code) — installing it would only flip these flags to
-                # `present: true` with zero real control behind them, so this
-                # stays an honest, documented gap rather than a padded score.
-                # This stack independently implements the same guarantees these
-                # controls describe (SPIFFE/SPIRE identity, the hash-chained
-                # audit_log, OPA policy enforcement) — just not wired through
-                # agent-governance-toolkit's expected `agentmesh` module path.
                 evidence += (
                     f" — controls {', '.join(missing)} require the `agentmesh` companion package, which is "
                     "currently just a name-reservation stub on PyPI with no real implementation; this repo "

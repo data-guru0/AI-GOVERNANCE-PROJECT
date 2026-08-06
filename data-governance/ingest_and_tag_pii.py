@@ -94,10 +94,7 @@ def main():
         tables[table_name] = table
         print(f"[ingest] cataloged table {table['fullyQualifiedName']} ({len(columns)} columns)")
 
-    # Tag PII columns with OpenMetadata's built-in PII.Sensitive tag via a
-    # real RFC 6902 JSON Patch — the tag that OPA's data_access.rego /
-    # governance_middleware.get_columns_to_mask() look up before deciding
-    # what to mask (Scenario C).
+    
     for table_name, pii_cols in PII_COLUMNS.items():
         table = tables[table_name]
         patch_ops = []

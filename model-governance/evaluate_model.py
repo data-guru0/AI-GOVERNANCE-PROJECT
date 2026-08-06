@@ -22,12 +22,6 @@ def main():
             rows.append(json.loads(line))
     eval_df = pd.DataFrame(rows)
 
-    # model_type="question-answering" would pull in MLflow's default
-    # toxicity metric, which downloads a HuggingFace model at eval time —
-    # an external network call beyond OpenAI/Groq, which the hard "only LLM
-    # APIs get called" requirement forbids. So metrics are picked explicitly
-    # instead: exact_match plus two pure-Python readability scores (textstat,
-    # no network), all still scored against real API responses.
     with mlflow.start_run(run_name="production_eval_gate"):
         result = mlflow.evaluate(
             model=f"models:/{MODEL_NAME}/Production",

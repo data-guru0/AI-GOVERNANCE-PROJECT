@@ -248,17 +248,7 @@ import asyncio  # noqa: E402
 from agent_os import ExecutionContext, StatelessKernel  # noqa: E402
 
 _AGT_POLICIES = {
-    # Mirrors policy/policies/tool_access.rego's intent from a different
-    # angle: OPA denies demo-agent -> purge_customer_data by role; this
-    # denies it by *action pattern*, so the two checks fail independently
-    # rather than both trusting the same allow-list.
-    #
-    # "search_orders" is deliberately ALSO blocked here even though OPA's
-    # tool_access.rego allows demo-agent to call it -- a demo-only rule so
-    # AGT has at least one case where it, not OPA, is the layer that
-    # actually says no. Without this, AGT genuinely runs on every request
-    # but OPA's redundant purge_customer_data check always wins the race,
-    # so AGT's own decision is never the one observed live.
+    
     "demo_agent_policy": {"blocked_actions": ["purge_customer_data", "search_orders"]},
 }
 _ROLE_TO_AGT_POLICIES = {"demo-agent": ["demo_agent_policy"], "admin": []}

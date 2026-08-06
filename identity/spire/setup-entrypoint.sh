@@ -31,10 +31,7 @@ echo "[spire-setup] join token generated"
 sed "s/__JOIN_TOKEN__/$TOKEN/" /template/agent.conf.template > /shared/agent.conf
 echo "[spire-setup] wrote /shared/agent.conf"
 
-# Delete any pre-existing entry first so re-running this script always
-# converges on the current, correct selector (e.g. after the docker-label
-# -> unix-uid switch documented in agent.conf.template) instead of leaving
-# a stale entry that `entry create` would just skip as "already exists".
+
 EXISTING_ID=$(docker exec spire-server /opt/spire/bin/spire-server entry show \
   -spiffeID spiffe://governance.demo/agent/demo-agent -output json 2>/dev/null | jq -r '.entries[0].id // empty')
 if [ -n "$EXISTING_ID" ]; then

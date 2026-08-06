@@ -50,14 +50,6 @@ def run_initial_setup() -> None:
 
 
 def _background_loop() -> None:
-    # Real bug found by actually running this: openmetadata-server's
-    # container reports "started" well before the Java app inside it is
-    # actually ready to accept API calls (30-90s+ boot time) — with no
-    # retry, a cold `docker compose up` would race this and permanently
-    # fail cataloging for that container's whole lifetime (no error
-    # visible anywhere except this log line). Retrying with a bounded
-    # wait is the same fix already applied to the Langfuse/Postgres race
-    # elsewhere in this project.
     ingest_path = os.path.join("data-governance", "ingest_and_tag_pii.py")
     for attempt in range(30):
         if _run(ingest_path):

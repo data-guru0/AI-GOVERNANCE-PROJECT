@@ -1,7 +1,3 @@
-# The "model card" attached to every MLflow Model Registry version of
-# governance-agent-model (see register_model.py). This is what step 4
-# (Model Governance) and the EU AI Act "risk tier documented" compliance
-# item both point to as evidence.
 model_name: governance-agent-model
 intended_use: >
   Answers student-support questions about the sample order dataset
@@ -22,13 +18,6 @@ limitations: >
   Tiny 5-example eval set, English-only, no adversarial red-teaming beyond
   what Guardrails AI / Agent Governance Toolkit catch at agent runtime.
 
-# `evaluate_for_production: true` means promote_model.py will actually run
-# this version through the real eval gate (model-governance/promote_model.py)
-# as a Production candidate. Both versions below are nominated -- neither is
-# pre-excluded -- so which one (if either) actually earns Production is
-# decided by real, measured evaluation results (champion/challenger), not by
-# this file. `risk_tier`/`risk_tier_reason` are updated by promote_model.py
-# itself after each real run, so they always reflect the latest evidence.
 versions:
   - version_alias: v1_llama_staging
     provider: groq
